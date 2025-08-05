@@ -2,6 +2,34 @@
   "expo": {
     "name": "hauler",
     "slug": "hauler",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "newArchEnabled": true,
+    "experiments": {
+      "turboModules": true
+    },
+    "android": {
+      "package": "com.moxiesegun.hauler"
+    },
+    "ios": {
+      "bundleIdentifier": "com.moxiesegun.hauler"
+    },
+    "plugins": [
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "$(PRODUCT_NAME) needs access to your Camera.",
+          "enableMicrophonePermission": true,
+          "microphonePermissionText": "$(PRODUCT_NAME) needs access to your Microphone."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
   }
 }

@@ -1,4 +1,4 @@
-package com.hauler
+package com.moxiesegun.hauler
 
 import android.os.Build
 import android.os.Bundle
