@@ -6,12 +6,16 @@ import {
   KycData,
   LoginResponse,
   OtpData,
+  ResetPasswordData,
+  Category,
 } from '../types/data'
 import { statusCode } from '../utils/status'
 import { tokenStorage } from '../storage/mmkv'
 import { useAuthStore } from '../storage/authStore'
 
-const API_BASE_URL = 'http://10.116.221.125:3002/api/drivers'
+const API_BASE_URL = 'https://driver-service-ka7r.onrender.com/api/drivers' // TODO: move to env
+// New root-level API base for non-driver endpoints like categories
+const API_ROOT_URL = 'https://driver-service-ka7r.onrender.com/api' // TODO: move to env
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   const token = tokenStorage.getToken()
@@ -29,6 +33,33 @@ const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   const data = await response.json()
   console.log(
     `[fetchWithAuth] URL: ${url}, Status: ${response.status}, Data:`,
+    data
+  )
+
+  if (!response.ok) {
+    throw { ...data, httpStatus: response.status } as ApiResponse
+  }
+
+  return data as ApiResponse
+}
+
+// Root-level fetch helper for endpoints under /api (not /api/drivers)
+const fetchFromApi = async (url: string, options: RequestInit = {}) => {
+  const token = tokenStorage.getToken()
+  const headers = new Headers(options.headers || {})
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  headers.set('Content-Type', 'application/json')
+
+  const response = await fetch(`${API_ROOT_URL}${url}`, {
+    ...options,
+    headers,
+  })
+  console.log('___----___-___--___', response)
+  const data = await response.json()
+  console.log(
+    `[fetchFromApi] URL: ${url}, Status: ${response.status}, Data:`,
     data
   )
 
@@ -59,11 +90,13 @@ export const useRegisterDriver = () =>
 
 export const useConfirmOtp = () =>
   useMutation<ApiResponse, ApiResponse, OtpData>({
-    mutationFn: (data) =>
-      fetchWithAuth('/confirm-otp', {
+    mutationFn: (data) => {
+      console.log('=====>>>', JSON.stringify(data))
+      return fetchWithAuth('/confirm-otp', {
         method: 'POST',
         body: JSON.stringify(data),
-      }),
+      })
+    },
   })
 
 export const useResendOtp = () =>
@@ -189,3 +222,13 @@ export const useGetKyc = () => {
     enabled: hasToken,
   })
 }
+
+export const useGetCategories = () => {
+  const hasToken = useHasToken()
+  return useQuery<ApiResponse<Category[]>>({
+    queryKey: ['categories'],
+    queryFn: () => fetchFromApi('/categories'),
+    enabled: hasToken,
+  })
+}
+

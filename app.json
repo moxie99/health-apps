@@ -7,11 +7,31 @@
     "experiments": {
       "turboModules": true
     },
+    "splash": {
+      "image": "./assets/images/logo.png",
+      "resizeMode": "contain"
+    },
     "android": {
-      "package": "com.moxiesegun.hauler"
+      "package": "com.moxiesegun.hauler",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "splash": {
+        "image": "./assets/images/logo.png",
+        "resizeMode": "contain"
+      }
     },
     "ios": {
-      "bundleIdentifier": "com.moxiesegun.hauler"
+      "bundleIdentifier": "com.moxiesegun.hauler",
+      "infoPlist": {
+        "NSCameraUsageDescription": "$(PRODUCT_NAME) needs access to your Camera.",
+        "NSMicrophoneUsageDescription": "$(PRODUCT_NAME) needs access to your Microphone."
+      },
+      "splash": {
+        "image": "./assets/images/logo.png",
+        "resizeMode": "contain"
+      }
     },
     "plugins": [
       [
@@ -30,6 +50,11 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "9edfd6c1-6832-4196-a185-6c8f50b6e8ba"
+      }
+    }
   }
 }

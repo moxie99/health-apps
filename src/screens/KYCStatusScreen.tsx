@@ -10,14 +10,22 @@ import {
   StatusBar,
   ScrollView,
   Alert,
+  TextInput,
+  FlatList,
 } from 'react-native'
 import { StackNavigationProp } from '@react-navigation/stack'
 import { RootStackParamList } from '../types/navigation'
 import { z } from 'zod'
 import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ImageData, SelfieData, TabItem } from '../types/data'
+import { ImageData, TabItem, Category } from '../types/data'
 import ProfilePicture from '../components/ProfilePicture'
+import DocumentCapture from '../components/DocumentCapture'
+import { useGetCategories } from '../api/driverApi'
+import { response } from '../storage/seed'
+import DateTimePickerModal from 'react-native-modal-datetime-picker'
+import Autocomplete from 'react-native-autocomplete-input'
+
 type KYCStatusScreenNavigationProp = StackNavigationProp<
   RootStackParamList,
   'KYCStatus'
@@ -27,13 +35,29 @@ interface Props {
   navigation: KYCStatusScreenNavigationProp
 }
 
-type TabIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6
+type TabIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
 
 const personalInfoSchema = z.object({
   location: z.string().min(2, 'Location is required'),
   houseAddress: z.string().min(2, 'House address is required'),
   officeAddress: z.string().min(2, 'Office address is required'),
-  dateOfBirth: z.string().min(1, 'Date of birth is required'),
+  dateOfBirth: z
+    .string()
+    .min(1, 'Date of birth is required')
+    .refine((date) => {
+      if (!date) return false
+      const birthDate = new Date(date)
+      const today = new Date()
+      const age = today.getFullYear() - birthDate.getFullYear()
+      const monthDiff = today.getMonth() - birthDate.getMonth()
+      if (
+        monthDiff < 0 ||
+        (monthDiff === 0 && today.getDate() < birthDate.getDate())
+      ) {
+        return age - 1 >= 18
+      }
+      return age >= 18
+    }, 'You must be at least 18 years old'),
   gender: z.string().min(1, 'Gender is required'),
 })
 
@@ -44,7 +68,7 @@ const driverLicenseSchema = z.object({
 })
 
 type DriverLicenseFormData = z.infer<typeof driverLicenseSchema>
-const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
+const KYCStatusScreen: React.FC<Props> = () => {
   const handleImageCaptured = (imageData: ImageData) => {
     console.log('Image URI:', imageData.uri)
     console.log('Dimensions:', imageData.width, imageData.height)
@@ -56,12 +80,62 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
     console.error('Camera error:', error.message)
   }
   const [activeTab, setActiveTab] = useState<TabIndex>(0)
+  const [selectedDays, setSelectedDays] = useState<string[]>([])
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
+  const dataNeeded = response
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [showGenderPicker, setShowGenderPicker] = useState(false)
+  const [location, setLocation] = useState('')
+  const [houseAddress, setHouseAddress] = useState('')
+  const [officeAddress, setOfficeAddress] = useState('')
+  const [filteredLocations, setFilteredLocations] = useState<string[]>([])
+  const [filteredHouseAddresses, setFilteredHouseAddresses] = useState<
+    string[]
+  >([])
+  const [filteredOfficeAddresses, setFilteredOfficeAddresses] = useState<
+    string[]
+  >([])
+
+  // Sample location data - you can replace this with your own data or API calls
+  const sampleLocations = [
+    'Downtown, City',
+    'Westside, City',
+    'Eastside, City',
+    'Northside, City',
+    'Southside, City',
+    'Central, City',
+    'Uptown, City',
+    'Midtown, City',
+    'Old Town, City',
+    'Business District, City',
+    'Residential Area, City',
+    'Industrial Zone, City',
+    'Shopping District, City',
+    'University Area, City',
+    'Airport District, City',
+  ]
+
+  // Sample address data - you can replace this with your own data or API calls
+  const sampleAddresses = [
+    '123 Main Street, Downtown, City',
+    '456 Oak Avenue, Westside, City',
+    '789 Pine Road, Eastside, City',
+    '321 Elm Street, Northside, City',
+    '654 Maple Drive, Southside, City',
+    '987 Cedar Lane, Central, City',
+    '147 Birch Boulevard, Uptown, City',
+    '258 Willow Way, Downtown, City',
+    '369 Spruce Street, Midtown, City',
+    '741 Cherry Circle, Old Town, City',
+  ]
 
   // Personal Info form
   const {
     control: personalControl,
     handleSubmit: handlePersonalSubmit,
     formState: { errors: personalErrors },
+    setValue: setPersonalValue,
   } = useForm<PersonalInfoFormData>({
     resolver: zodResolver(personalInfoSchema),
     defaultValues: {
@@ -85,6 +159,14 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
     },
   })
 
+  // Categories from API
+  const {
+    data: categoriesResponse,
+    isLoading: categoriesLoading,
+    error: categoriesError,
+  } = useGetCategories()
+
+  const categories: Category[] = categoriesResponse?.data ?? []
   const tabs: TabItem[] = [
     { id: 0, title: 'Personal Info' },
     { id: 1, title: 'Selfie' },
@@ -93,6 +175,7 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
     { id: 4, title: 'Insurance' },
     { id: 5, title: 'Inspection' },
     { id: 6, title: 'Availability' },
+    { id: 7, title: 'Categories' },
   ]
 
   const daysOfWeek: string[] = [
@@ -104,6 +187,114 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
     'Saturday',
     'Sunday',
   ]
+  const toggleDay = (day: string) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    )
+  }
+
+  const toggleCategory = (categoryId: string) => {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(categoryId)
+        ? prev.filter((id) => id !== categoryId)
+        : [...prev, categoryId]
+    )
+  }
+
+  const handleDateChange = (date: Date) => {
+    setShowDatePicker(false)
+    setSelectedDate(date)
+    // Update the form value using the proper method
+    setPersonalValue('dateOfBirth', date.toISOString().split('T')[0])
+  }
+
+  const showDatePickerModal = () => {
+    setShowDatePicker(true)
+  }
+
+  const hideDatePicker = () => {
+    setShowDatePicker(false)
+  }
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Select date of birth'
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
+  }
+
+  const toggleGenderPicker = () => {
+    setShowGenderPicker(!showGenderPicker)
+  }
+
+  const selectGender = (gender: string) => {
+    setPersonalValue('gender', gender)
+    setShowGenderPicker(false)
+  }
+
+  const handleLocationChange = (text: string) => {
+    setLocation(text)
+    setPersonalValue('location', text)
+
+    if (text.length > 2) {
+      const filtered = sampleLocations.filter((loc) =>
+        loc.toLowerCase().includes(text.toLowerCase())
+      )
+      setFilteredLocations(filtered)
+    } else {
+      setFilteredLocations([])
+    }
+  }
+
+  const handleHouseAddressChange = (text: string) => {
+    setHouseAddress(text)
+    setPersonalValue('houseAddress', text)
+
+    if (text.length > 2) {
+      const filtered = sampleAddresses.filter((address) =>
+        address.toLowerCase().includes(text.toLowerCase())
+      )
+      setFilteredHouseAddresses(filtered)
+    } else {
+      setFilteredHouseAddresses([])
+    }
+  }
+
+  const handleOfficeAddressChange = (text: string) => {
+    setOfficeAddress(text)
+    setPersonalValue('officeAddress', text)
+
+    if (text.length > 2) {
+      const filtered = sampleAddresses.filter((address) =>
+        address.toLowerCase().includes(text.toLowerCase())
+      )
+      setFilteredOfficeAddresses(filtered)
+    } else {
+      setFilteredOfficeAddresses([])
+    }
+  }
+
+  const selectLocation = (loc: string) => {
+    setLocation(loc)
+    setPersonalValue('location', loc)
+    setFilteredLocations([])
+  }
+
+  const selectHouseAddress = (address: string) => {
+    setHouseAddress(address)
+    setPersonalValue('houseAddress', address)
+    setFilteredHouseAddresses([])
+  }
+
+  const selectOfficeAddress = (address: string) => {
+    setOfficeAddress(address)
+    setPersonalValue('officeAddress', address)
+    setFilteredOfficeAddresses([])
+  }
+
   const renderPersonalInfo = (): JSX.Element => (
     <View style={styles.contentContainer}>
       <Text style={styles.sectionTitle}>Personal Information</Text>
@@ -114,13 +305,27 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         render={({ field: { value } }) => (
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>Location</Text>
-            <View style={styles.fieldInput}>
-              <Text
-                style={styles.placeholderText}
-                onPress={() => {}} // Placeholder for location picker
-              >
-                {value || 'Select location'}
-              </Text>
+            <View style={styles.addressInputContainer}>
+              <Autocomplete
+                data={filteredLocations}
+                value={location}
+                onChangeText={handleLocationChange}
+                flatListProps={{
+                  keyExtractor: (_, idx) => idx.toString(),
+                  renderItem: ({ item }) => (
+                    <TouchableOpacity
+                      style={styles.autocompleteItem}
+                      onPress={() => selectLocation(item)}
+                    >
+                      <Text style={styles.autocompleteItemText}>{item}</Text>
+                    </TouchableOpacity>
+                  ),
+                }}
+                inputContainerStyle={styles.addressTextInput}
+                placeholder='Select location'
+                placeholderTextColor='#adb5bd'
+                style={styles.autocompleteTextInput}
+              />
             </View>
             {personalErrors.location && (
               <Text style={styles.errorText}>
@@ -137,13 +342,27 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         render={({ field: { value } }) => (
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>House Address</Text>
-            <View style={styles.fieldInput}>
-              <Text
-                style={styles.placeholderText}
-                onPress={() => {}} // Placeholder for text input
-              >
-                {value || 'Enter house address'}
-              </Text>
+            <View style={styles.addressInputContainer}>
+              <Autocomplete
+                data={filteredHouseAddresses}
+                value={houseAddress}
+                onChangeText={handleHouseAddressChange}
+                flatListProps={{
+                  keyExtractor: (_, idx) => idx.toString(),
+                  renderItem: ({ item }) => (
+                    <TouchableOpacity
+                      style={styles.autocompleteItem}
+                      onPress={() => selectHouseAddress(item)}
+                    >
+                      <Text style={styles.autocompleteItemText}>{item}</Text>
+                    </TouchableOpacity>
+                  ),
+                }}
+                inputContainerStyle={styles.addressTextInput}
+                placeholder='Enter house address'
+                placeholderTextColor='#adb5bd'
+                style={styles.autocompleteTextInput}
+              />
             </View>
             {personalErrors.houseAddress && (
               <Text style={styles.errorText}>
@@ -160,13 +379,27 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         render={({ field: { value } }) => (
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>Office Address</Text>
-            <View style={styles.fieldInput}>
-              <Text
-                style={styles.placeholderText}
-                onPress={() => {}} // Placeholder for text input
-              >
-                {value || 'Enter office address'}
-              </Text>
+            <View style={styles.addressInputContainer}>
+              <Autocomplete
+                data={filteredOfficeAddresses}
+                value={officeAddress}
+                onChangeText={handleOfficeAddressChange}
+                flatListProps={{
+                  keyExtractor: (_, idx) => idx.toString(),
+                  renderItem: ({ item }) => (
+                    <TouchableOpacity
+                      style={styles.autocompleteItem}
+                      onPress={() => selectOfficeAddress(item)}
+                    >
+                      <Text style={styles.autocompleteItemText}>{item}</Text>
+                    </TouchableOpacity>
+                  ),
+                }}
+                inputContainerStyle={styles.addressTextInput}
+                placeholder='Enter office address'
+                placeholderTextColor='#adb5bd'
+                style={styles.autocompleteTextInput}
+              />
             </View>
             {personalErrors.officeAddress && (
               <Text style={styles.errorText}>
@@ -183,18 +416,35 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         render={({ field: { value } }) => (
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>Date of Birth</Text>
-            <View style={styles.fieldInput}>
+            <TouchableOpacity
+              style={styles.fieldInput}
+              onPress={showDatePickerModal}
+              activeOpacity={0.7}
+            >
               <Text
-                style={styles.placeholderText}
-                onPress={() => {}} // Placeholder for date picker
+                style={[styles.placeholderText, value && { color: '#495057' }]}
               >
-                {value || 'Select date of birth'}
+                {formatDate(value)}
               </Text>
-            </View>
+            </TouchableOpacity>
             {personalErrors.dateOfBirth && (
               <Text style={styles.errorText}>
                 {personalErrors.dateOfBirth.message}
               </Text>
+            )}
+            {showDatePicker && (
+              <DateTimePickerModal
+                isVisible={showDatePicker}
+                mode='date'
+                onConfirm={handleDateChange}
+                onCancel={hideDatePicker}
+                maximumDate={
+                  new Date(Date.now() - 18 * 365 * 24 * 60 * 60 * 1000)
+                } // 18 years ago
+                minimumDate={
+                  new Date(Date.now() - 100 * 365 * 24 * 60 * 60 * 1000)
+                } // 100 years ago
+              />
             )}
           </View>
         )}
@@ -206,14 +456,33 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         render={({ field: { value } }) => (
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>Gender</Text>
-            <View style={styles.fieldInput}>
+            <TouchableOpacity
+              style={styles.fieldInput}
+              onPress={toggleGenderPicker}
+              activeOpacity={0.7}
+            >
               <Text
-                style={styles.placeholderText}
-                onPress={() => {}} // Placeholder for gender picker
+                style={[styles.placeholderText, value && { color: '#495057' }]}
               >
                 {value || 'Select gender'}
               </Text>
-            </View>
+            </TouchableOpacity>
+            {showGenderPicker && (
+              <View style={styles.dropdownContainer}>
+                <TouchableOpacity
+                  style={styles.dropdownOption}
+                  onPress={() => selectGender('Male')}
+                >
+                  <Text style={styles.dropdownOptionText}>Male</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.dropdownOption}
+                  onPress={() => selectGender('Female')}
+                >
+                  <Text style={styles.dropdownOptionText}>Female</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             {personalErrors.gender && (
               <Text style={styles.errorText}>
                 {personalErrors.gender.message}
@@ -231,51 +500,18 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         onPress={handlePersonalSubmit(() => setActiveTab(1))}
       >
         <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
-          Continue to Driver&apos;s License
+          Continue to Selfie
         </Text>
       </TouchableOpacity>
     </View>
   )
 
   const renderSelfie = (): JSX.Element => (
-    <ProfilePicture
-      onImageCaptured={handleImageCaptured}
-      onError={handleError}
-    />
-  )
-  const renderDriverLicense = (): JSX.Element => (
     <View style={styles.contentContainer}>
-      <Text style={styles.sectionTitle}>Driver&apos;s License</Text>
-      {/* License Upload */}
-      <Controller
-        control={licenseControl}
-        name='licenseImage'
-        render={({ field: { onChange, value } }) => (
-          <View style={styles.fieldContainer}>
-            <Text style={styles.fieldLabel}>Upload Driver&apos;s License</Text>
-            <TouchableOpacity
-              style={[
-                styles.fieldInput,
-                { alignItems: 'center', justifyContent: 'center' },
-              ]}
-              onPress={() => {
-                // Placeholder for camera/ML logic for license
-                // onChange('license-image-uri')
-              }}
-            >
-              <Text style={styles.placeholderText}>
-                {value
-                  ? "Driver's License Uploaded"
-                  : 'Take a photo of your license'}
-              </Text>
-            </TouchableOpacity>
-            {licenseErrors.licenseImage && (
-              <Text style={styles.errorText}>
-                {licenseErrors.licenseImage.message}
-              </Text>
-            )}
-          </View>
-        )}
+      <Text style={styles.sectionTitle}>Take a Selfie</Text>
+      <ProfilePicture
+        onImageCaptured={handleImageCaptured}
+        onError={handleError}
       />
       {/* Continue Button */}
       <TouchableOpacity
@@ -283,7 +519,38 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
           styles.fieldInput,
           { backgroundColor: '#007AFF', marginTop: 24 },
         ]}
-        onPress={handleLicenseSubmit(() => setActiveTab(2))}
+        onPress={() => setActiveTab(2)}
+      >
+        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+          Continue to Driver&apos;s License
+        </Text>
+      </TouchableOpacity>
+    </View>
+  )
+
+  const renderDriverLicense = (): JSX.Element => (
+    <View style={styles.contentContainer}>
+      <Text style={styles.sectionTitle}>Driver&apos;s License</Text>
+      <DocumentCapture
+        documentType="license"
+        onDocumentCaptured={(documentData) => {
+          console.log('Driver License captured:', documentData)
+          // Update form value
+          setPersonalValue('licenseImage', documentData.uri)
+          Alert.alert('Success', 'Driver\'s License captured successfully!')
+        }}
+        onError={(error) => {
+          console.error('Driver License error:', error)
+          Alert.alert('Error', error.message)
+        }}
+      />
+      {/* Continue Button */}
+      <TouchableOpacity
+        style={[
+          styles.fieldInput,
+          { backgroundColor: '#007AFF', marginTop: 24 },
+        ]}
+        onPress={() => setActiveTab(3)}
       >
         <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
           Continue to Vehicle Info
@@ -291,6 +558,57 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
       </TouchableOpacity>
     </View>
   )
+
+  const renderCategories = (): JSX.Element => (
+    <View style={styles.contentContainer}>
+      <Text style={styles.sectionTitle}>Categories</Text>
+      {categoriesLoading && (
+        <Text style={styles.placeholderText}>Loading categories...</Text>
+      )}
+      {categoriesError && (
+        <Text style={styles.errorText}>Failed to load categories</Text>
+      )}
+      {categories && (
+        <View style={styles.checkboxContainer}>
+          {categories.map((cat) => {
+            const isSelected = selectedCategoryIds.includes(cat.id)
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={styles.checkboxRow}
+                onPress={() => toggleCategory(cat.id)}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.checkbox,
+                    isSelected && styles.checkboxChecked,
+                  ]}
+                />
+                <Text style={styles.checkboxLabel}>{cat.name}</Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
+      )}
+      {/* Submit Button */}
+      <TouchableOpacity
+        style={[
+          styles.fieldInput,
+          { backgroundColor: '#28a745', marginTop: 24 },
+        ]}
+        onPress={() => {
+          // Handle final submission
+          Alert.alert('Success', 'KYC information submitted successfully!')
+        }}
+      >
+        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+          Submit KYC Information
+        </Text>
+      </TouchableOpacity>
+    </View>
+  )
+
   const renderVehicleInfo = (): JSX.Element => (
     <View style={styles.contentContainer}>
       <Text style={styles.sectionTitle}>Vehicle Information</Text>
@@ -342,98 +660,82 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </View>
       </View>
+
+      {/* Continue Button */}
+      <TouchableOpacity
+        style={[
+          styles.fieldInput,
+          { backgroundColor: '#007AFF', marginTop: 24 },
+        ]}
+        onPress={() => setActiveTab(4)}
+      >
+        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+          Continue to Insurance
+        </Text>
+      </TouchableOpacity>
     </View>
   )
+
   const renderInsurance = (): JSX.Element => (
     <View style={styles.contentContainer}>
       <Text style={styles.sectionTitle}>Vehicle Insurance Policy</Text>
-
-      <View style={styles.fieldContainer}>
-        <Text style={styles.fieldLabel}>Insurance Company</Text>
-        <View style={styles.fieldInput}>
-          <Text style={styles.placeholderText}>
-            Enter insurance company name
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.fieldContainer}>
-        <Text style={styles.fieldLabel}>Policy Number</Text>
-        <View style={styles.fieldInput}>
-          <Text style={styles.placeholderText}>Enter policy number</Text>
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={[styles.fieldContainer, styles.halfWidth]}>
-          <Text style={styles.fieldLabel}>Effective Date</Text>
-          <View style={styles.fieldInput}>
-            <Text style={styles.placeholderText}>MM/DD/YYYY</Text>
-          </View>
-        </View>
-
-        <View style={[styles.fieldContainer, styles.halfWidth]}>
-          <Text style={styles.fieldLabel}>Expiry Date</Text>
-          <View style={styles.fieldInput}>
-            <Text style={styles.placeholderText}>MM/DD/YYYY</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.fieldContainer}>
-        <Text style={styles.fieldLabel}>Coverage Amount</Text>
-        <View style={styles.fieldInput}>
-          <Text style={styles.placeholderText}>Enter coverage amount</Text>
-        </View>
-      </View>
+      <DocumentCapture
+        documentType="insurance"
+        onDocumentCaptured={(documentData) => {
+          console.log('Insurance captured:', documentData)
+          Alert.alert('Success', 'Insurance document captured successfully!')
+        }}
+        onError={(error) => {
+          console.error('Insurance error:', error)
+          Alert.alert('Error', error.message)
+        }}
+      />
+      {/* Continue Button */}
+      <TouchableOpacity
+        style={[
+          styles.fieldInput,
+          { backgroundColor: '#007AFF', marginTop: 24 },
+        ]}
+        onPress={() => setActiveTab(5)}
+      >
+        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+          Continue to Inspection
+        </Text>
+      </TouchableOpacity>
     </View>
   )
+
   const renderInspection = (): JSX.Element => (
     <View style={styles.contentContainer}>
       <Text style={styles.sectionTitle}>
         Vehicle Inspection Report / License
       </Text>
-
-      <View style={styles.fieldContainer}>
-        <Text style={styles.fieldLabel}>Inspection Certificate Number</Text>
-        <View style={styles.fieldInput}>
-          <Text style={styles.placeholderText}>Enter certificate number</Text>
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={[styles.fieldContainer, styles.halfWidth]}>
-          <Text style={styles.fieldLabel}>Inspection Date</Text>
-          <View style={styles.fieldInput}>
-            <Text style={styles.placeholderText}>MM/DD/YYYY</Text>
-          </View>
-        </View>
-
-        <View style={[styles.fieldContainer, styles.halfWidth]}>
-          <Text style={styles.fieldLabel}>Expiry Date</Text>
-          <View style={styles.fieldInput}>
-            <Text style={styles.placeholderText}>MM/DD/YYYY</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.fieldContainer}>
-        <Text style={styles.fieldLabel}>Inspection Station</Text>
-        <View style={styles.fieldInput}>
-          <Text style={styles.placeholderText}>
-            Enter inspection station name
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.fieldContainer}>
-        <Text style={styles.fieldLabel}>Status</Text>
-        <View style={styles.fieldInput}>
-          <Text style={styles.placeholderText}>Pass/Fail</Text>
-        </View>
-      </View>
+      <DocumentCapture
+        documentType="inspection"
+        onDocumentCaptured={(documentData) => {
+          console.log('Inspection captured:', documentData)
+          Alert.alert('Success', 'Inspection document captured successfully!')
+        }}
+        onError={(error) => {
+          console.error('Inspection error:', error)
+          Alert.alert('Error', error.message)
+        }}
+      />
+      {/* Continue Button */}
+      <TouchableOpacity
+        style={[
+          styles.fieldInput,
+          { backgroundColor: '#007AFF', marginTop: 24 },
+        ]}
+        onPress={() => setActiveTab(6)}
+      >
+        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+          Continue to Availability
+        </Text>
+      </TouchableOpacity>
     </View>
   )
+
   const renderAvailability = (): JSX.Element => (
     <View style={styles.contentContainer}>
       <Text style={styles.sectionTitle}>Automobile Availability Options</Text>
@@ -441,12 +743,25 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.fieldContainer}>
         <Text style={styles.fieldLabel}>Available Days</Text>
         <View style={styles.checkboxContainer}>
-          {daysOfWeek.map((day: string) => (
-            <TouchableOpacity key={day} style={styles.checkboxRow}>
-              <View style={styles.checkbox} />
-              <Text style={styles.checkboxLabel}>{day}</Text>
-            </TouchableOpacity>
-          ))}
+          {daysOfWeek.map((day: string) => {
+            const isSelected = selectedDays.includes(day)
+            return (
+              <TouchableOpacity
+                key={day}
+                style={styles.checkboxRow}
+                onPress={() => toggleDay(day)}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.checkbox,
+                    isSelected && styles.checkboxChecked,
+                  ]}
+                />
+                <Text style={styles.checkboxLabel}>{day}</Text>
+              </TouchableOpacity>
+            )
+          })}
         </View>
       </View>
 
@@ -481,6 +796,19 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </View>
       </View>
+
+      {/* Continue Button */}
+      <TouchableOpacity
+        style={[
+          styles.fieldInput,
+          { backgroundColor: '#007AFF', marginTop: 24 },
+        ]}
+        onPress={() => setActiveTab(7)}
+      >
+        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+          Continue to Categories
+        </Text>
+      </TouchableOpacity>
     </View>
   )
   const renderContent = (): JSX.Element => {
@@ -499,14 +827,23 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
         return renderInspection()
       case 6:
         return renderAvailability()
+      case 7:
+        return renderCategories()
       default:
         return renderPersonalInfo()
     }
   }
 
+  const renderContentItem = ({ item }: { item: number }) => {
+    return renderContent()
+  }
+
   const handleTabPress = (tabId: number): void => {
     setActiveTab(tabId as TabIndex)
   }
+
+  const contentData = [activeTab] // Single item array for FlatList
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle='dark-content' backgroundColor='#fff' />
@@ -537,9 +874,14 @@ const KYCStatusScreen: React.FC<Props> = ({ navigation }) => {
       </ScrollView>
 
       {/* Content */}
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {renderContent()}
-      </ScrollView>
+      <FlatList
+        data={contentData}
+        renderItem={renderContentItem}
+        keyExtractor={(item) => item.toString()}
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        scrollEnabled={false}
+      />
     </SafeAreaView>
   )
 }
@@ -621,6 +963,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#dee2e6',
     minHeight: 50,
+    maxHeight: 50,
+    width: '100%',
     justifyContent: 'center',
     elevation: 1,
     shadowColor: '#000',
@@ -633,6 +977,7 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 80,
+    maxHeight: 80,
     alignItems: 'flex-start',
     paddingTop: 14,
   },
@@ -677,6 +1022,9 @@ const styles = StyleSheet.create({
     marginRight: 12,
     backgroundColor: 'transparent',
   },
+  checkboxChecked: {
+    backgroundColor: '#007AFF',
+  },
   checkboxLabel: {
     fontSize: 16,
     color: '#495057',
@@ -686,6 +1034,108 @@ const styles = StyleSheet.create({
     color: '#dc3545',
     fontSize: 12,
     marginTop: 4,
+  },
+  dropdownContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    marginTop: 8,
+  },
+  dropdownOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  dropdownOptionText: {
+    fontSize: 16,
+    color: '#495057',
+    fontWeight: '500',
+  },
+  dropdownDescription: {
+    fontSize: 16,
+    color: '#495057',
+    fontWeight: '500',
+  },
+  addressInputContainer: {
+    position: 'relative',
+    width: '100%',
+  },
+  addressTextInput: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    minHeight: 50,
+    maxHeight: 50,
+    width: '100%',
+    justifyContent: 'center',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  autocompleteContainer: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    zIndex: 1000,
+  },
+  autocompleteListView: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  autocompleteRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  autocompleteDescription: {
+    fontSize: 16,
+    color: '#495057',
+    fontWeight: '500',
+  },
+  autocompleteItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  autocompleteItemText: {
+    fontSize: 16,
+    color: '#495057',
+    fontWeight: '500',
+  },
+  autocompleteTextInput: {
+    fontSize: 16,
+    color: '#495057',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
   },
 })
 

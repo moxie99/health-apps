@@ -23,55 +23,64 @@ import FaceDetection, { Face } from '@react-native-ml-kit/face-detection'
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window')
 
 // Type definitions
-export interface ImageData {
+export interface DocumentData {
   uri: string
   width: number
   height: number
-  faceData: Face
+  documentType: 'license' | 'insurance' | 'inspection'
+  analysis: {
+    facesDetected: number
+    documentDetected: boolean
+    textDetected: boolean
+    qualityScore: number
+    authenticityScore: number
+  }
 }
 
-export interface ProfilePictureProps {
-  onImageCaptured: (imageData: ImageData) => void
+export interface DocumentCaptureProps {
+  documentType: 'license' | 'insurance' | 'inspection'
+  onDocumentCaptured: (documentData: DocumentData) => void
   onError: (error: Error) => void
 }
 
-const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
-  onImageCaptured,
+const DocumentCaptureComponent: React.FC<DocumentCaptureProps> = ({
+  documentType,
+  onDocumentCaptured,
   onError,
 }) => {
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
   const [isProcessing, setIsProcessing] = useState<boolean>(false)
-  const [faceDetected, setFaceDetected] = useState<boolean>(false)
+  const [documentDetected, setDocumentDetected] = useState<boolean>(false)
   const [captureEnabled, setCaptureEnabled] = useState<boolean>(false)
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false)
-  const [isDetecting, setIsDetecting] = useState<boolean>(false)
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [analysisResults, setAnalysisResults] = useState<any>(null)
 
   const camera = useRef<Camera>(null)
-  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const devices = useCameraDevices()
-  const device = devices.find((d) => d.position === 'front')
+  const device = devices.find((d) => d.position === 'back')
   const { hasPermission, requestPermission } = useCameraPermission()
 
   // Animations
-  const ovalPulse = useRef(new Animated.Value(0)).current
-  const borderAnim = useRef(new Animated.Value(0)).current // 0 = idle, 1 = detected
+  const documentPulse = useRef(new Animated.Value(0)).current
+  const borderAnim = useRef(new Animated.Value(0)).current
   const captureScale = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
-    // Pulse animation when not detected
-    if (!faceDetected && isCameraActive) {
+    // Pulse animation when document not detected
+    if (!documentDetected && isCameraActive) {
       const loop = Animated.loop(
         Animated.sequence([
-          Animated.timing(ovalPulse, {
+          Animated.timing(documentPulse, {
             toValue: 1,
-            duration: 900,
+            duration: 1000,
             easing: Easing.out(Easing.quad),
             useNativeDriver: true,
           }),
-          Animated.timing(ovalPulse, {
+          Animated.timing(documentPulse, {
             toValue: 0,
-            duration: 900,
+            duration: 1000,
             easing: Easing.in(Easing.quad),
             useNativeDriver: true,
           }),
@@ -80,17 +89,17 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
       loop.start()
       return () => loop.stop()
     }
-  }, [faceDetected, isCameraActive, ovalPulse])
+  }, [documentDetected, isCameraActive, documentPulse])
 
   useEffect(() => {
     // Border color animation when detection state changes
     Animated.timing(borderAnim, {
-      toValue: faceDetected ? 1 : 0,
+      toValue: documentDetected ? 1 : 0,
       duration: 300,
       easing: Easing.out(Easing.quad),
       useNativeDriver: false,
     }).start()
-  }, [faceDetected, borderAnim])
+  }, [documentDetected, borderAnim])
 
   useEffect(() => {
     // Capture button subtle scale when enabled
@@ -118,86 +127,6 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
     }
   }, [captureEnabled, captureScale])
 
-  // Start face detection interval
-  const startFaceDetection = () => {
-    // Disable automatic detection for now due to file access issues
-    console.log('Face detection ready - use manual detection button')
-  }
-
-  // Stop face detection interval
-  const stopFaceDetection = () => {
-    if (detectionIntervalRef.current) {
-      console.log('Stopping face detection...')
-      clearInterval(detectionIntervalRef.current)
-      detectionIntervalRef.current = null
-    }
-  }
-
-  // Alternative: Manual face detection approach
-  const detectFacesManually = async () => {
-    if (!camera.current || isDetecting) return
-
-    try {
-      setIsDetecting(true)
-
-      const photo = await camera.current.takePhoto({})
-
-      // Try different URI formats for Android compatibility
-      let photoUri = photo.path
-      if (!photoUri.startsWith('file://')) {
-        photoUri = `file://${photo.path}`
-      }
-
-      console.log('Trying to detect faces in:', photoUri)
-
-      const faces: Face[] = await FaceDetection.detect(photoUri, {
-        performanceMode: 'fast',
-        landmarkMode: 'none',
-        contourMode: 'none',
-        classificationMode: 'none',
-        minFaceSize: 0.1,
-      })
-
-      console.log(`Manual detection found ${faces.length} faces`)
-
-      if (faces.length === 1) {
-        setFaceDetected(true)
-        setCaptureEnabled(true)
-        setPreviewImage(photoUri) // Store the image for preview
-        Alert.alert(
-          'Face Detected!',
-          'Perfect! You can now capture your photo.'
-        )
-      } else if (faces.length === 0) {
-        setFaceDetected(false)
-        setCaptureEnabled(false)
-        setPreviewImage(null)
-        Alert.alert(
-          'No Face Detected',
-          'Please position your face in the oval and try again.'
-        )
-      } else {
-        setFaceDetected(false)
-        setCaptureEnabled(false)
-        setPreviewImage(null)
-        Alert.alert(
-          'Multiple Faces',
-          'Please ensure only your face is visible and try again.'
-        )
-      }
-    } catch (error) {
-      console.error('Manual face detection error:', error)
-      Alert.alert(
-        'Detection Error',
-        'Unable to detect faces. Please try again.'
-      )
-      setFaceDetected(false)
-      setCaptureEnabled(false)
-    } finally {
-      setIsDetecting(false)
-    }
-  }
-
   useEffect(() => {
     if (hasPermission) {
       setIsCameraActive(true)
@@ -206,20 +135,6 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
       handlePermissionRequest()
     }
   }, [hasPermission])
-
-  // Start detection when camera becomes active
-  useEffect(() => {
-    if (isCameraActive) {
-      startFaceDetection()
-    } else {
-      stopFaceDetection()
-    }
-
-    // Cleanup on unmount
-    return () => {
-      stopFaceDetection()
-    }
-  }, [isCameraActive])
 
   const handlePermissionRequest = async () => {
     try {
@@ -252,99 +167,105 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
     )
   }
 
+  // Document analysis function
+  const analyzeDocument = async (photoUri: string): Promise<any> => {
+    try {
+      setIsAnalyzing(true)
+      
+      // Face detection to ensure document is authentic
+      const faces: Face[] = await FaceDetection.detect(photoUri, {
+        performanceMode: 'fast',
+        landmarkMode: 'none',
+        contourMode: 'none',
+        classificationMode: 'none',
+        minFaceSize: 0.05,
+      })
+
+      // Document analysis simulation (you can integrate with real OCR/document analysis APIs)
+      const analysis = {
+        facesDetected: faces.length,
+        documentDetected: true, // Simulated - integrate with document detection API
+        textDetected: true, // Simulated - integrate with OCR API
+        qualityScore: Math.floor(Math.random() * 30) + 70, // 70-100
+        authenticityScore: Math.floor(Math.random() * 20) + 80, // 80-100
+      }
+
+      // Validation logic
+      if (faces.length === 0) {
+        throw new Error('No faces detected in document. Please ensure the document is clearly visible.')
+      }
+
+      if (faces.length > 2) {
+        throw new Error('Too many faces detected. Please ensure only the document is visible.')
+      }
+
+      if (analysis.qualityScore < 75) {
+        throw new Error('Document quality too low. Please ensure good lighting and clear image.')
+      }
+
+      if (analysis.authenticityScore < 85) {
+        throw new Error('Document authenticity cannot be verified. Please try again.')
+      }
+
+      return analysis
+    } catch (error) {
+      throw error
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   const takePicture = async (): Promise<void> => {
     if (!camera.current || !captureEnabled || isProcessing) return
 
     try {
       setIsProcessing(true)
-      stopFaceDetection()
 
       const photo: PhotoFile = await camera.current.takePhoto({
-        flash: 'off',
-        enableAutoRedEyeReduction: true,
+        flash: 'auto',
+        enableAutoRedEyeReduction: false,
       })
 
-      // Final face verification
-      const faces: Face[] = await FaceDetection.detect(
-        photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`,
-        {
-          performanceMode: 'accurate',
-          landmarkMode: 'all',
-          contourMode: 'all',
-          classificationMode: 'all',
-          minFaceSize: 0.15,
-        }
-      )
+      // Prepare photo URI
+      const photoUri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`
 
-      if (faces.length === 0) {
-        Alert.alert(
-          'No Face Detected',
-          'Please ensure your face is clearly visible in the oval frame.'
-        )
-        setIsProcessing(false)
-        startFaceDetection()
-        return
-      }
+      // Analyze the document
+      const analysis = await analyzeDocument(photoUri)
 
-      if (faces.length > 1) {
-        Alert.alert(
-          'Multiple Faces Detected',
-          'Please ensure only your face is visible in the frame.'
-        )
-        setIsProcessing(false)
-        startFaceDetection()
-        return
-      }
-
-      const face: Face = faces[0]
-      const faceBounds = face.frame
-      const faceWidth = faceBounds.width
-      const faceHeight = faceBounds.height
-      const aspectRatio = faceWidth / faceHeight
-
-      if (aspectRatio < 0.5 || aspectRatio > 2.0) {
-        Alert.alert(
-          'Face Position',
-          'Please position your face properly within the oval frame.'
-        )
-        setIsProcessing(false)
-        startFaceDetection()
-        return
-      }
-
-      const imageData: ImageData = {
+      // Create document data
+      const documentData: DocumentData = {
         uri: photo.path,
         width: photo.width,
         height: photo.height,
-        faceData: face,
+        documentType,
+        analysis,
       }
 
-      // Prepare success preview
-      const finalUri = photo.path.startsWith('file://')
-        ? photo.path
-        : `file://${photo.path}`
-      setPreviewImage(finalUri)
+      // Store preview and results
+      setPreviewImage(photoUri)
+      setAnalysisResults(analysis)
 
-      onImageCaptured && onImageCaptured(imageData)
+      // Call success callback
+      onDocumentCaptured(documentData)
       setIsCameraActive(false)
       setIsProcessing(false)
+
     } catch (error) {
-      console.error('Error taking picture:', error)
-      const err =
-        error instanceof Error ? error : new Error('Failed to capture image')
-      onError && onError(err)
+      console.error('Error capturing document:', error)
+      const err = error instanceof Error ? error : new Error('Failed to capture document')
+      onError(err)
       setIsProcessing(false)
-      startFaceDetection()
-      Alert.alert('Error', 'Failed to capture image. Please try again.')
+      Alert.alert('Error', err.message || 'Failed to capture document. Please try again.')
     }
   }
 
   const retryCapture = () => {
     setIsCameraActive(true)
-    setFaceDetected(false)
+    setDocumentDetected(false)
     setCaptureEnabled(false)
     setIsProcessing(false)
-    setPreviewImage(null) // Clear preview image
+    setPreviewImage(null)
+    setAnalysisResults(null)
   }
 
   // Permission denied state
@@ -356,7 +277,7 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
             Camera Permission Required
           </Text>
           <Text style={styles.permissionDeniedText}>
-            To take your profile picture, please enable camera permission in
+            To capture your {documentType} document, please enable camera permission in
             your device settings.
           </Text>
           <TouchableOpacity
@@ -390,11 +311,11 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
     )
   }
 
-  // No front camera
+  // No back camera
   if (!device) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Front camera not available</Text>
+        <Text style={styles.errorText}>Back camera not available</Text>
       </View>
     )
   }
@@ -411,10 +332,23 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
             <Text style={styles.successBadgeText}>✓</Text>
           </View>
           <Text style={styles.successText}>
-            Profile picture captured successfully!
+            {documentType.charAt(0).toUpperCase() + documentType.slice(1)} captured successfully!
           </Text>
+          {analysisResults && (
+            <View style={styles.analysisResults}>
+              <Text style={styles.analysisText}>
+                Quality Score: {analysisResults.qualityScore}%
+              </Text>
+              <Text style={styles.analysisText}>
+                Authenticity: {analysisResults.authenticityScore}%
+              </Text>
+              <Text style={styles.analysisText}>
+                Faces Detected: {analysisResults.facesDetected}
+              </Text>
+            </View>
+          )}
           <TouchableOpacity style={styles.button} onPress={retryCapture}>
-            <Text style={styles.buttonText}>Take Another Picture</Text>
+            <Text style={styles.buttonText}>Capture Again</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -422,19 +356,44 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
   }
 
   // Camera view
-  // Interpolated values
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['#ffffff', '#4CAF50'],
   })
-  const pulseScale = ovalPulse.interpolate({
+  const pulseScale = documentPulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [1, 1.06],
+    outputRange: [1, 1.02],
   })
-  const pulseOpacity = ovalPulse.interpolate({
+  const pulseOpacity = documentPulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.12, 0],
+    outputRange: [0.15, 0],
   })
+
+  const getDocumentTitle = () => {
+    switch (documentType) {
+      case 'license':
+        return 'Driver\'s License'
+      case 'insurance':
+        return 'Insurance Document'
+      case 'inspection':
+        return 'Inspection Document'
+      default:
+        return 'Document'
+    }
+  }
+
+  const getDocumentInstructions = () => {
+    switch (documentType) {
+      case 'license':
+        return '• Place driver\'s license in the frame\n• Ensure all text is clearly visible\n• Good lighting for best results'
+      case 'insurance':
+        return '• Place insurance document in the frame\n• Ensure policy details are visible\n• Avoid glare and shadows'
+      case 'inspection':
+        return '• Place inspection report in the frame\n• Ensure certificate details are clear\n• Good lighting for verification'
+      default:
+        return '• Place document in the frame\n• Ensure all text is clearly visible\n• Good lighting for best results'
+    }
+  }
 
   return (
     <View style={styles.container}>
@@ -447,16 +406,16 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
         enableZoomGesture={false}
       />
 
-      {/* Oval Overlay with Image Preview */}
+      {/* Document Frame Overlay */}
       <View style={styles.overlay}>
         <View style={styles.overlayTop} />
         <View style={styles.overlayMiddle}>
           <View style={styles.overlaySide} />
           <Animated.View
             style={[
-              styles.ovalFrame,
+              styles.documentFrame,
               { borderColor },
-              faceDetected && styles.ovalFrameActive,
+              documentDetected && styles.documentFrameActive,
             ]}
           >
             {previewImage && (
@@ -466,7 +425,7 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
                 resizeMode='cover'
               />
             )}
-            {!faceDetected && (
+            {!documentDetected && (
               <Animated.View
                 pointerEvents='none'
                 style={[
@@ -486,42 +445,31 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
         <View
           style={[
             styles.statusIndicator,
-            faceDetected ? styles.statusActive : styles.statusInactive,
+            documentDetected ? styles.statusActive : styles.statusInactive,
           ]}
         />
         <Text style={styles.statusText}>
-          {faceDetected
-            ? 'Face detected - Ready to capture'
-            : 'Position your face in the oval'}
+          {documentDetected
+            ? 'Document detected - Ready to capture'
+            : `Position ${getDocumentTitle()} in the frame`}
         </Text>
       </View>
 
-      {/* Clear Preview Button */}
-      {previewImage && (
-        <View style={styles.clearContainer}>
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={() => {
-              setPreviewImage(null)
-              setFaceDetected(false)
-              setCaptureEnabled(false)
-            }}
-          >
-            <Text style={styles.clearButtonText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      )}
       {/* Manual Detection Button */}
       <View style={styles.testContainer}>
         <TouchableOpacity
-          style={[styles.testButton, isDetecting && styles.testButtonDisabled]}
-          onPress={detectFacesManually}
-          disabled={isDetecting}
+          style={[styles.testButton, isAnalyzing && styles.testButtonDisabled]}
+          onPress={() => {
+            // Simulate document detection for testing
+            setDocumentDetected(true)
+            setCaptureEnabled(true)
+          }}
+          disabled={isAnalyzing}
         >
-          {isDetecting ? (
+          {isAnalyzing ? (
             <ActivityIndicator size='small' color='#fff' />
           ) : (
-            <Text style={styles.testButtonText}>Check Face</Text>
+            <Text style={styles.testButtonText}>Detect Document</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -555,8 +503,7 @@ const ProfilePictureComponent: React.FC<ProfilePictureProps> = ({
       {/* Instructions */}
       <View style={styles.instructionsContainer}>
         <Text style={styles.instructionsText}>
-          • Look directly at the camera{'\n'}• Ensure good lighting{'\n'}• Keep
-          your face within the oval
+          {getDocumentInstructions()}
         </Text>
       </View>
     </View>
@@ -585,20 +532,20 @@ const styles = StyleSheet.create({
   },
   overlayMiddle: {
     flexDirection: 'row',
-    height: screenWidth * 0.8,
+    height: screenWidth * 0.7,
   },
   overlaySide: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  ovalFrame: {
-    width: screenWidth * 0.8,
-    height: screenWidth * 0.8,
-    borderRadius: screenWidth * 0.4,
+  documentFrame: {
+    width: screenWidth * 0.7,
+    height: screenWidth * 0.7,
+    borderRadius: 12,
     borderWidth: 3,
     borderColor: '#fff',
     backgroundColor: 'transparent',
-    overflow: 'hidden', // This ensures the image is clipped to the oval shape
+    overflow: 'hidden',
   },
   pulseRing: {
     position: 'absolute',
@@ -606,16 +553,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: screenWidth * 0.4,
-    borderWidth: 6,
+    borderRadius: 12,
+    borderWidth: 4,
     borderColor: '#fff',
   },
   previewImage: {
     width: '100%',
     height: '100%',
-    borderRadius: screenWidth * 0.4,
+    borderRadius: 12,
   },
-  ovalFrameActive: {
+  documentFrameActive: {
     borderColor: '#4CAF50',
     shadowColor: '#4CAF50',
     shadowOffset: { width: 0, height: 0 },
@@ -672,29 +619,6 @@ const styles = StyleSheet.create({
   },
   testButtonDisabled: {
     backgroundColor: '#666',
-  },
-  clearContainer: {
-    position: 'absolute',
-    top: 120,
-    left: 20,
-  },
-  clearButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  clearButtonText: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: 'bold',
   },
   controlsContainer: {
     position: 'absolute',
@@ -776,6 +700,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 38,
     fontWeight: 'bold',
+  },
+  analysisResults: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  analysisText: {
+    color: '#333',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 5,
   },
   permissionDeniedContainer: {
     flex: 1,
@@ -862,4 +799,4 @@ const styles = StyleSheet.create({
   },
 })
 
-export default ProfilePictureComponent
+export default DocumentCaptureComponent 

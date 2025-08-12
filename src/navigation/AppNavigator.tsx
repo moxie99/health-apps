@@ -19,7 +19,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>()
 function AppNavigator(): React.JSX.Element {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const { user } = useAuthStore((state) => state)
-
+  console.log('==++++++=', user, isAuthenticated)
   return (
     <NavigationContainer>
       <Stack.Navigator

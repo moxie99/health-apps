@@ -159,3 +159,13 @@ export interface ImageData {
   height: number
   faceData: Face
 }
+
+export interface ResetPasswordData {
+  resetToken: string
+  newPassword: string
+}
+
+export interface Category {
+  id: string
+  name: string
+}
