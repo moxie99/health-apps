@@ -152,6 +152,7 @@ const KYCStatusScreen: React.FC<Props> = () => {
     control: licenseControl,
     handleSubmit: handleLicenseSubmit,
     formState: { errors: licenseErrors },
+    setValue: setLicenseValue,
   } = useForm<DriverLicenseFormData>({
     resolver: zodResolver(driverLicenseSchema),
     defaultValues: {
@@ -535,8 +536,8 @@ const KYCStatusScreen: React.FC<Props> = () => {
         documentType="license"
         onDocumentCaptured={(documentData) => {
           console.log('Driver License captured:', documentData)
-          // Update form value
-          setPersonalValue('licenseImage', documentData.uri)
+          // Update form value using the correct control
+          setLicenseValue('licenseImage', documentData.uri)
           Alert.alert('Success', 'Driver\'s License captured successfully!')
         }}
         onError={(error) => {
